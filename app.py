@@ -1,93 +1,96 @@
-import streamlit as st
+import io
+import uuid
+import os
+from PIL import Image
 import google.generativeai as genai
-import requests
-import base64
+import streamlit as st
 
-# 1. Настройка страницы Streamlit
-st.set_page_config(
-    page_title="MVN AI",
-    page_icon="🤖",
-    layout="centered"
-)
+st.set_page_config(page_title="MVN AI", page_icon="🔴", layout="wide")
 
-st.title("🤖 MVN AI")
-st.caption("Ваш умный ИИ-помощник")
+st.markdown("""
+    <style>
+    .stChatInput { bottom: 20px; }
+    div[data-testid="stColumn"] { display: flex; align-items: center; }
+    </style>
+""", unsafe_allow_html=True)
 
-# 2. Проверка и подключение API-ключа Gemini из Secrets
+# 1. Получение API-ключа из настроек Streamlit Secrets
 if "GEMINI_API_KEY" in st.secrets:
-    genai.configure(api_key=st.secrets["GEMINI_API_KEY"])
+    api_key = st.secrets["GEMINI_API_KEY"]
 else:
-    st.error("⚠️ Ошибка: API-ключ не найден! Добавьте GEMINI_API_KEY в Secrets на сайте Streamlit.")
+    api_key = os.environ.get("GEMINI_API_KEY")
+
+if not api_key:
+    st.error("⚠️ Ошибка: API-ключ не найден! Добавьте GEMINI_API_KEY в Secrets на сайте Streamlit Cloud.")
     st.stop()
 
-# 3. Настройка системной инструкции и инициализация актуальной модели
-SYSTEM_PROMPT = """
-Ты — MVN AI, универсальный, продвинутый и автономный ИИ-ассистент.
-Отвечай структурированно, понятно, вежливо и максимально полно на любые вопросы пользователя.
-"""
+genai.configure(api_key=api_key)
 
+# Настройка модели Gemini 1.5 Flash
+SYSTEM_PROMPT = "Ты — MVN AI, универсальный и продвинутый ИИ-ассистент."
 model = genai.GenerativeModel(
     model_name="gemini-1.5-flash",
     system_instruction=SYSTEM_PROMPT
 )
 
-# 4. Инициализация истории чата в сессии
-if "messages" not in st.session_state:
-    st.session_state.messages = []
+MAX_CHATS = 100
 
-# 5. Отображение сохранённых сообщений
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
-        if "image" in message:
-            st.image(message["image"])
+# 2. Инициализация чатов
+if "chats" not in st.session_state:
+    default_id = str(uuid.uuid4())
+    st.session_state.chats = {
+        default_id: {"name": "Новый чат 1", "messages": []}
+    }
+    st.session_state.current_chat_id = default_id
 
-# 6. Обработка ввода пользователя
+def create_new_chat():
+    if len(st.session_state.chats) >= MAX_CHATS:
+        st.sidebar.error(f"Достигнут лимит в {MAX_CHATS} чатов!")
+        return
+    new_id = str(uuid.uuid4())
+    chat_num = len(st.session_state.chats) + 1
+    st.session_state.chats[new_id] = {
+        "name": f"Новый чат {chat_num}",
+        "messages": []
+    }
+    st.session_state.current_chat_id = new_id
+
+# 3. Боковая панель (Sidebar)
+st.sidebar.title("🔴 MVN AI Control")
+
+if st.sidebar.button("➕ Создать новый чат"):
+    create_new_chat()
+
+chat_options = {cid: data["name"] for cid, data in st.session_state.chats.items()}
+selected_chat_id = st.sidebar.selectbox(
+    "Мои чаты:",
+    options=list(chat_options.keys()),
+    format_func=lambda x: chat_options[x],
+    index=list(chat_options.keys()).index(st.session_state.current_chat_id)
+)
+st.session_state.current_chat_id = selected_chat_id
+
+current_chat = st.session_state.chats[st.session_state.current_chat_id]
+
+# 4. Главный экран чата
+st.title(f"💬 {current_chat['name']}")
+
+for msg in current_chat["messages"]:
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+
+# 5. Отправка сообщений
 if prompt := st.chat_input("Задайте вопрос..."):
-    # Отображаем сообщение пользователя
-    st.session_state.messages.append({"role": "user", "content": prompt})
+    current_chat["messages"].append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Ответ ИИ
     with st.chat_message("assistant"):
-        message_placeholder = st.empty()
-        
-        # Проверка запроса на генерацию изображений
-        image_keywords = ["нарисуй", "сгенерируй", "создай картинку", "draw", "image", "картинка"]
-        if any(keyword in prompt.lower() for keyword in image_keywords):
+        with st.spinner("MVN AI думает..."):
             try:
-                with st.spinner("Генерирую изображение..."):
-                    clean_prompt = prompt.replace(" ", "%20")
-                    img_url = f"https://image.pollinations.ai/prompt/{clean_prompt}?width=800&height=800&nologo=true"
-                    res = requests.get(img_url)
-                    
-                    if res.status_code == 200:
-                        st.image(res.content, caption=f"Запрос: {prompt}")
-                        st.session_state.messages.append({
-                            "role": "assistant", 
-                            "content": f"Вот изображение по вашему запросу: **{prompt}**",
-                            "image": res.content
-                        })
-                    else:
-                        st.error("Не удалось сгенерировать картинку. Попробуйте другой запрос.")
+                # Отправка запроса в Gemini 1.5 Flash
+                response = model.generate_content(prompt)
+                st.markdown(response.text)
+                current_chat["messages"].append({"role": "assistant", "content": response.text})
             except Exception as e:
-                st.error(f"Ошибка при генерации картинки: {e}")
-        else:
-            # Текстовый генератор через Gemini 1.5 Flash
-            try:
-                with st.spinner("MVN AI думает..."):
-                    # Формируем историю для модели
-                    formatted_history = []
-                    for msg in st.session_state.messages[:-1]:
-                        if "content" in msg and msg["content"]:
-                            role = "user" if msg["role"] == "user" else "model"
-                            formatted_history.append({"role": role, "parts": [msg["content"]]})
-                    
-                    chat = model.start_chat(history=formatted_history)
-                    response = chat.send_message(prompt)
-                    
-                    message_placeholder.markdown(response.text)
-                    st.session_state.messages.append({"role": "assistant", "content": response.text})
-            except Exception as e:
-                st.error(f"Ошибка подключения к Gemini API: {e}")
+                st.error(f"Ошибка подключения: {e}")
