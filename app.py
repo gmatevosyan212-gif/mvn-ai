@@ -57,15 +57,13 @@ if user_prompt or uploaded_file:
     image = None
     
     if uploaded_file:
-        # Проверяем, картинка это или документ
         if uploaded_file.type.startswith("image/"):
             image = Image.open(uploaded_file)
             user_msg["image"] = image
         else:
-            # Если это документ/код, читаем текстовое содержимое
             file_content = uploaded_file.read().decode("utf-8", errors="ignore")
             prompt_text = f"{prompt_text}\n\nСодержимое файла:\n{file_content}"
-            user_msg["content"] = user_prompt  # Показываем пользователю только его текст
+            user_msg["content"] = user_prompt
     
     st.session_state.messages.append(user_msg)
     
@@ -77,7 +75,7 @@ if user_prompt or uploaded_file:
     with st.chat_message("assistant"):
         with st.spinner("MVN AI думает..."):
             try:
-                # Жёсткая инструкция про создателя
+                # Жесткая инструкция про создателя
                 config = types.GenerateContentConfig(
                     system_instruction=(
                         "Ты — искусственный интеллект по имени MVN AI. Твоего создателя и разработчика зовут Гор Матевосян. "
@@ -91,15 +89,15 @@ if user_prompt or uploaded_file:
                     contents.append(image)
                 contents.append(prompt_text)
 
-                # Используем потоковый вывод (streaming) для плавного появления текста
-                response_stream = client.models.generate_content_stream(
+                # Обычный стабильный запрос без ошибок потока
+                response = client.models.generate_content(
                     model=selected_model,
                     contents=contents,
                     config=config
                 )
                 
-                # Выводим текст по мере поступления
-                bot_reply = st.write_stream(response_stream)
+                bot_reply = response.text
+                st.write(bot_reply)
                 
                 # Сохраняем ответ в память
                 st.session_state.messages.append({"role": "assistant", "content": bot_reply})
