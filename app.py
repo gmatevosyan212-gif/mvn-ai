@@ -16,12 +16,20 @@ client = genai.Client(api_key=api_key)
 with st.sidebar:
     st.header("⚙️ Настройки MVN AI")
     
-    # Выбор модели
-    selected_model = st.selectbox(
+    # Красивые имена для пользователя, которые мапят на реальные технические названия моделей
+    model_options = {
+        "MVN-1.5-flash": "gemini-3.6-flash",
+        "MVN-1.0-flash": "gemini-2.5-flash"
+    }
+    
+    selected_display_name = st.selectbox(
         "Выберите модель:",
-        ["gemini-3.6-flash", "gemini-2.5-flash"],
+        list(model_options.keys()),
         index=0
     )
+    
+    # Получаем реальное техническое имя модели по выбранному пользователем
+    selected_model = model_options[selected_display_name]
     
     st.markdown("---")
     
@@ -89,7 +97,7 @@ if user_prompt or uploaded_file:
                     contents.append(image)
                 contents.append(prompt_text)
 
-                # Обычный стабильный запрос без ошибок потока
+                # Запрос к выбранной модели
                 response = client.models.generate_content(
                     model=selected_model,
                     contents=contents,
